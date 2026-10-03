@@ -78,6 +78,7 @@ async def _apply_sqlite_compatibility_migrations(connection: AsyncSession) -> No
     await _ensure_column(connection, "search_tasks", "hold_expires_at", "DATETIME")
     await _ensure_column(connection, "search_tasks", "last_economy_count", "INTEGER")
     await _ensure_column(connection, "search_tasks", "last_business_count", "INTEGER")
+    await _ensure_column(connection, "diet_profiles", "meal_pattern", "VARCHAR(8) DEFAULT '5'")
 
 
 async def _ensure_column(connection, table_name: str, column_name: str, column_sql: str) -> None:

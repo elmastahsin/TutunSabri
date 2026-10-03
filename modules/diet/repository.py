@@ -11,16 +11,28 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.models import User
-from modules.diet.config import MEAL_SLOTS
+from modules.diet.config import DEFAULT_MEAL_PATTERN, MEAL_PATTERNS, MEAL_SLOT_BY_KEY, MealSlot
 from modules.diet.models import DietEvent, DietLog, DietPlan, DietProfile
 
 
+def active_slots(profile: DietProfile) -> list[MealSlot]:
+    _, keys, _ = MEAL_PATTERNS.get(profile.meal_pattern or "", MEAL_PATTERNS[DEFAULT_MEAL_PATTERN])
+    return [MEAL_SLOT_BY_KEY[key] for key in keys]
+
+
 def meal_times_of(profile: DietProfile) -> dict[str, str]:
+    """Times of the profile's active meals: user overrides, then pattern defaults."""
     try:
         stored = json.loads(profile.meal_times or "{}")
     except ValueError:
         stored = {}
-    return {slot.key: stored.get(slot.key, slot.default_time) for slot in MEAL_SLOTS}
+    _, _, pattern_defaults = MEAL_PATTERNS.get(
+        profile.meal_pattern or "", MEAL_PATTERNS[DEFAULT_MEAL_PATTERN]
+    )
+    return {
+        slot.key: stored.get(slot.key, pattern_defaults.get(slot.key, slot.default_time))
+        for slot in active_slots(profile)
+    }
 
 
 async def get_profile(session: AsyncSession, user_id: int) -> Optional[DietProfile]:

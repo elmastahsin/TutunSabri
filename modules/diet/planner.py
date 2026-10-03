@@ -18,8 +18,9 @@ from modules.diet.config import (
     ACTIVITY_LEVELS,
     GOALS,
     HISTORY_DAYS,
+    MEAL_PATTERNS,
+    MealSlot,
     MEAL_SLOT_BY_KEY,
-    MEAL_SLOTS,
     SEXES,
     SYSTEM_PROMPT,
 )
@@ -31,6 +32,13 @@ logger = logging.getLogger(__name__)
 WEEKDAYS_TR = ("Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar")
 # Share of the daily calorie target per slot (main meals carry most of it).
 SLOT_CALORIE_SHARE = {"kahvalti": 0.25, "ara1": 0.10, "ogle": 0.30, "ara2": 0.10, "aksam": 0.25}
+
+
+def slot_kcal(profile: DietProfile, calories: int) -> dict[str, int]:
+    """Split the daily target over the profile's active meals."""
+    slots = repo.active_slots(profile)
+    total = sum(SLOT_CALORIE_SHARE[slot.key] for slot in slots)
+    return {slot.key: round(calories * SLOT_CALORIE_SHARE[slot.key] / total) for slot in slots}
 
 
 @dataclass(frozen=True)
@@ -77,6 +85,7 @@ def describe_profile(profile: DietProfile) -> str:
             f"- Hedef kilo: {target}",
             f"- Hedef: {GOALS.get(profile.goal, profile.goal)}",
             f"- Aktivite: {ACTIVITY_LEVELS.get(profile.activity, (profile.activity,))[0]}",
+            f"- Öğün düzeni: {MEAL_PATTERNS.get(profile.meal_pattern or '', ('günde 5 öğün',))[0]}",
             f"- Alerji / kısıtlar: {profile.restrictions or 'yok'}",
             f"- Tercihler / sevmedikleri: {profile.preferences or 'yok'}",
         )
@@ -114,10 +123,15 @@ async def _history_context(user_id: int, plan_date: date) -> str:
 
 
 def _build_plan_prompt(profile: DietProfile, targets: Targets, plan_date: date, history: str) -> str:
-    slots = "\n".join(
-        f"- {slot.key}: {slot.label} (~{round(targets.calories * SLOT_CALORIE_SHARE[slot.key])} kcal)"
-        for slot in MEAL_SLOTS
-    )
+    active = repo.active_slots(profile)
+    kcal = slot_kcal(profile, targets.calories)
+    slots = "\n".join(f"- {slot.key}: {slot.label} (~{kcal[slot.key]} kcal)" for slot in active)
+    pattern_rule = ""
+    if not any(slot.key.startswith("ara") for slot in active):
+        pattern_rule = (
+            f"- Danışan günde yalnızca {len(active)} öğün yiyor; ara öğün önerme. Öğünler "
+            "doyurucu, lifli ve proteinden zengin olsun ki öğünler arasında acıkmasın.\n"
+        )
     return f"""{plan_date:%d.%m.%Y} {WEEKDAYS_TR[plan_date.weekday()]} günü için bir günlük beslenme planı hazırla.
 
 Danışan profili:
@@ -138,14 +152,14 @@ Kurallar:
 - Alerji ve kısıtlara kesinlikle uy; sevmediği yiyecekleri önerme.
 - Türk mutfağından, evde kolay hazırlanabilen, mevsimine uygun yemekler seç.
 - Porsiyonları gram, adet veya kaşık gibi ölçülerle yaz.
-- Ara öğünler pratik olsun (meyve, yoğurt, kuruyemiş vb.).
+{pattern_rule}- Ara öğünler (varsa) pratik olsun (meyve, yoğurt, kuruyemiş vb.).
 - Son günlerde önerilenleri tekrar etme; çeşitlilik sağla.
 - Ana öğünlerde recipe_query alanına bilinen bir tarif adı yaz; ara öğünlerde boş bırakabilirsin.
 - URL yazma.
 
 Yalnızca şu yapıda JSON döndür:
 {{"note": "güne dair kısa, motive edici diyetisyen notu", "meals": [{_meal_json_spec()}, ...]}}
-"meals" listesinde şu sırayla tam olarak bu slot anahtarları olsun: {", ".join(slot.key for slot in MEAL_SLOTS)}."""
+"meals" listesinde şu sırayla tam olarak bu slot anahtarları olsun: {", ".join(slot.key for slot in active)}."""
 
 
 def _normalize_meal(raw: Any, slot_key: str) -> dict[str, Any]:
@@ -172,11 +186,11 @@ def _normalize_meal(raw: Any, slot_key: str) -> dict[str, Any]:
     }
 
 
-def _normalize_plan(data: dict[str, Any]) -> dict[str, Any]:
+def _normalize_plan(data: dict[str, Any], slots: list[MealSlot]) -> dict[str, Any]:
     raw_meals = data.get("meals") if isinstance(data.get("meals"), list) else []
     by_slot = {m.get("slot"): m for m in raw_meals if isinstance(m, dict)}
     meals = []
-    for index, slot in enumerate(MEAL_SLOTS):
+    for index, slot in enumerate(slots):
         raw = by_slot.get(slot.key)
         if raw is None and index < len(raw_meals):
             raw = raw_meals[index]
@@ -191,14 +205,19 @@ async def get_or_create_plan(
         async with SessionFactory() as session:
             existing = await repo.get_plan(session, profile.user_id, plan_date)
         if existing is not None:
-            return json.loads(existing.content)
+            plan = json.loads(existing.content)
+            # A plan made for another meal pattern is stale; build a new one.
+            if [m.get("slot") for m in plan.get("meals", [])] == [
+                slot.key for slot in repo.active_slots(profile)
+            ]:
+                return plan
 
     targets = compute_targets(profile)
     history = await _history_context(profile.user_id, plan_date)
     data, source = await generate_json(
         _build_plan_prompt(profile, targets, plan_date, history), SYSTEM_PROMPT
     )
-    plan = _normalize_plan(data)
+    plan = _normalize_plan(data, repo.active_slots(profile))
     plan["targets"] = {"kcal": targets.calories, "protein_g": targets.protein_g, "water_l": targets.water_l}
     async with SessionFactory() as session:
         await repo.save_plan(session, profile.user_id, plan_date, plan, source)
@@ -212,7 +231,7 @@ async def swap_meal(profile: DietProfile, plan_date: date, slot_key: str) -> dic
     current = next(m for m in plan["meals"] if m["slot"] == slot_key)
     others = ", ".join(m["title"] for m in plan["meals"] if m["slot"] != slot_key)
     targets = compute_targets(profile)
-    kcal = current.get("kcal") or round(targets.calories * SLOT_CALORIE_SHARE[slot_key])
+    kcal = current.get("kcal") or slot_kcal(profile, targets.calories).get(slot_key)
     prompt = f"""Danışan bugünkü {MEAL_SLOT_BY_KEY[slot_key].label} önerisini ("{current['title']}") değiştirmek istiyor.
 Yaklaşık {kcal} kcal olan, tamamen farklı bir alternatif öner.
 
@@ -312,7 +331,7 @@ def render_daily_list(plan: dict[str, Any], plan_date: date, meal_times: dict[st
         lines.extend(("", f"🩺 {html.escape(plan['note'])}"))
     for meal in plan["meals"]:
         slot = MEAL_SLOT_BY_KEY[meal["slot"]]
-        lines.extend(("", f"{slot.emoji} <b>{meal_times[slot.key]} · {slot.label}</b>"))
+        lines.extend(("", f"{slot.emoji} <b>{meal_times.get(slot.key, '')} · {slot.label}</b>"))
         lines.append(html.escape(meal["title"]))
         if meal["items"]:
             lines.append("<i>" + html.escape(", ".join(meal["items"])) + "</i>")
