@@ -24,7 +24,7 @@ from modules.diet.config import (
     SEXES,
     SYSTEM_PROMPT,
 )
-from modules.diet.llm import generate_json, generate_text
+from modules.ai.llm import generate_json, generate_text
 from modules.diet.models import DietProfile
 
 

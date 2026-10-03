@@ -21,7 +21,7 @@ from core.models import User
 from modules.ai.handlers import split_message
 from modules.diet import repository as repo
 from modules.diet.config import ACTIVITY_LEVELS, GOALS, MEAL_PATTERNS, SEXES, TIMEZONE
-from modules.diet.llm import DietAIError
+from modules.ai.llm import LLMUnavailableError
 from modules.diet.models import DietProfile
 from modules.diet.planner import (
     ask_dietitian,
@@ -364,7 +364,7 @@ async def cb_plan(callback: CallbackQuery, db_user: User) -> None:
     progress = await callback.message.answer("🩺 Planına bakıyorum...", parse_mode=None)
     try:
         plan = await get_or_create_plan(profile, _today(), force=force)
-    except DietAIError:
+    except LLMUnavailableError:
         await progress.edit_text("Plan şu anda hazırlanamadı; AI servisine ulaşılamadı.", parse_mode=None)
         return
     chunks = iter(split_message(render_daily_list(plan, _today(), repo.meal_times_of(profile))))
@@ -513,7 +513,7 @@ async def cb_meal_swap(callback: CallbackQuery, db_user: User) -> None:
     plan_date = _parse_stamp(stamp)
     try:
         meal = await swap_meal(profile, plan_date, slot_key)
-    except DietAIError:
+    except LLMUnavailableError:
         await callback.message.answer("Şu an alternatif üretemedim, biraz sonra tekrar dene.", parse_mode=None)
         return
     await callback.message.edit_reply_markup(reply_markup=None)
@@ -616,7 +616,7 @@ async def handle_ask(message: Message, command: CommandObject, db_user: User) ->
     progress = await message.answer("🩺 Düşünüyorum...", parse_mode=None)
     try:
         answer = await ask_dietitian(profile, question[:1000])
-    except DietAIError:
+    except LLMUnavailableError:
         await progress.edit_text("Şu an yanıt veremiyorum; AI servisine ulaşılamadı.", parse_mode=None)
         return
     chunks = iter(split_message(answer))

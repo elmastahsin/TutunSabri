@@ -49,6 +49,7 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 async def init_database() -> None:
     from core.models import AccessRequest, SearchTask, User
     from modules.diet import models as diet_models  # noqa: F401
+    from modules.travel import models as travel_models  # noqa: F401
 
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
