@@ -1,7 +1,8 @@
-"""LLM access for the dietitian: Gemini free tier first, local Ollama as fallback."""
+"""Shared LLM access: Gemini free tier first, local Ollama as fallback."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -16,11 +17,13 @@ from modules.ai.client import OllamaClient, OllamaError
 logger = logging.getLogger(__name__)
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 GEMINI_TIMEOUT_SECONDS = 90.0
-# The local model is slow on CPU; plans are prepared ahead of meal time, so wait longer.
-OLLAMA_DIET_TIMEOUT_SECONDS = 600.0
+GEMINI_ATTEMPTS = 2
+GEMINI_RETRY_DELAY_SECONDS = 3.0
+# The local model is slow on CPU; plans are prepared ahead of time, so wait longer.
+OLLAMA_PLAN_TIMEOUT_SECONDS = 600.0
 
 
-class DietAIError(RuntimeError):
+class LLMUnavailableError(RuntimeError):
     """Raised when neither Gemini nor Ollama could produce a usable answer."""
 
 
@@ -53,20 +56,24 @@ async def _gemini(prompt: str, system_prompt: str, json_mode: bool, max_tokens: 
 
 async def _complete(prompt: str, system_prompt: str, json_mode: bool, max_tokens: int) -> tuple[str, str]:
     if settings.gemini_api_key:
-        try:
-            return await _gemini(prompt, system_prompt, json_mode, max_tokens), "gemini"
-        except Exception:
-            logger.warning("Gemini request failed; falling back to Ollama", exc_info=True)
+        for attempt in range(GEMINI_ATTEMPTS):
+            try:
+                return await _gemini(prompt, system_prompt, json_mode, max_tokens), "gemini"
+            except Exception:
+                logger.warning("Gemini request failed (attempt %s)", attempt + 1, exc_info=True)
+                if attempt + 1 < GEMINI_ATTEMPTS:
+                    await asyncio.sleep(GEMINI_RETRY_DELAY_SECONDS)
+        logger.warning("Gemini unavailable; falling back to Ollama")
     try:
         text = await OllamaClient().chat(
             prompt,
             system_prompt=system_prompt,
             max_tokens=max_tokens,
             json_mode=json_mode,
-            timeout=OLLAMA_DIET_TIMEOUT_SECONDS,
+            timeout=OLLAMA_PLAN_TIMEOUT_SECONDS,
         )
     except OllamaError as exc:
-        raise DietAIError("Diyet planı için hiçbir AI servisine ulaşılamadı.") from exc
+        raise LLMUnavailableError("Hiçbir AI servisine ulaşılamadı.") from exc
     return text, "ollama"
 
 
@@ -74,13 +81,13 @@ def _parse_json(text: str) -> dict[str, Any]:
     cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
     start, end = cleaned.find("{"), cleaned.rfind("}")
     if start == -1 or end == -1:
-        raise DietAIError("AI yanıtı JSON içermiyor.")
+        raise LLMUnavailableError("AI yanıtı JSON içermiyor.")
     try:
         data = json.loads(cleaned[start : end + 1])
     except ValueError as exc:
-        raise DietAIError("AI yanıtı geçerli JSON değil.") from exc
+        raise LLMUnavailableError("AI yanıtı geçerli JSON değil.") from exc
     if not isinstance(data, dict):
-        raise DietAIError("AI yanıtı beklenen yapıda değil.")
+        raise LLMUnavailableError("AI yanıtı beklenen yapıda değil.")
     return data
 
 

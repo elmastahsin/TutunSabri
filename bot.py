@@ -21,6 +21,8 @@ from core.repositories import (
 from modules.ai.handlers import router as ai_router
 from modules.diet.handlers import router as diet_router
 from modules.diet.scheduler import run_diet_scheduler
+from modules.travel.handlers import router as travel_router
+from modules.travel.scheduler import run_travel_scheduler
 from modules.news.digest import run_daily_news_scheduler
 from modules.news.handlers import router as news_router
 from modules.news.podcast import router as podcast_router
@@ -100,6 +102,7 @@ async def run_bot() -> None:
             BotCommand(command="diyetsor", description="Diyetisyene soru sor"),
             BotCommand(command="kilo", description="Güncel kilonu kaydet"),
             BotCommand(command="diyetsaat", description="Öğün saatlerini ayarla"),
+            BotCommand(command="gezi", description="Seyahat rehberi ve gezi planları"),
             BotCommand(command="news", description="Güncel haber özetini hazırla"),
             BotCommand(command="podcast", description="Yerel haber podcasti hazırla"),
             BotCommand(command="stats", description="İstatistikleri göster"),
@@ -113,12 +116,14 @@ async def run_bot() -> None:
     dispatcher.include_router(core_router)
     dispatcher.include_router(ai_router)
     dispatcher.include_router(diet_router)
+    dispatcher.include_router(travel_router)
     dispatcher.include_router(news_router)
     dispatcher.include_router(podcast_router)
     dispatcher.include_router(yht_router)
     schedulers = [
         asyncio.create_task(run_daily_news_scheduler(bot)),
         asyncio.create_task(run_diet_scheduler(bot)),
+        asyncio.create_task(run_travel_scheduler(bot)),
     ]
     try:
         await dispatcher.start_polling(bot)

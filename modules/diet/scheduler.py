@@ -26,7 +26,7 @@ from modules.diet.config import (
     WEIGH_IN_TIME,
     WEIGH_IN_WEEKDAY,
 )
-from modules.diet.llm import DietAIError
+from modules.ai.llm import LLMUnavailableError
 from modules.diet.models import DietProfile
 from modules.diet.planner import (
     get_or_create_plan,
@@ -162,7 +162,7 @@ async def _tick(bot: Bot) -> None:
                     continue
             try:
                 await _deliver(bot, profile, user, event)
-            except DietAIError:
+            except LLMUnavailableError:
                 logger.warning("Diet plan unavailable for event %s", event.key, exc_info=True)
                 await bot.send_message(
                     user.telegram_user_id,
