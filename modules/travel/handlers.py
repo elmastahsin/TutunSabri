@@ -35,7 +35,15 @@ from modules.travel.weather import forecast
 
 logger = logging.getLogger(__name__)
 router = Router(name="travel")
-DATE_PATTERN = re.compile(r"^(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?$")
+DATE_PART = r"(\d{1,2})(?:[./](\d{1,2})(?:[./](\d{2,4}))?)?"
+DATE_PATTERN = re.compile(rf"^{DATE_PART}$")
+RANGE_PATTERN = re.compile(rf"^{DATE_PART}\s*(?:-|–|—|ile)\s*{DATE_PART}$")
+MONTHS = {
+    "ocak": 1, "şubat": 2, "subat": 2, "mart": 3, "nisan": 4, "mayıs": 5, "mayis": 5,
+    "haziran": 6, "temmuz": 7, "ağustos": 8, "agustos": 8, "eylül": 9, "eylul": 9,
+    "ekim": 10, "kasım": 11, "kasim": 11, "aralık": 12, "aralik": 12,
+}
+MONTH_NAME_PATTERN = re.compile(r"\s*\b(" + "|".join(MONTHS) + r")\b")
 
 
 class TripSetup(StatesGroup):
@@ -82,27 +90,61 @@ def _trip_keyboard(trip: Trip) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _parse_date(text: str, today: date) -> Optional[date]:
-    text = text.strip().casefold()
-    if text == "bugün":
-        return today
-    if text == "yarın":
-        return today + timedelta(days=1)
-    match = DATE_PATTERN.match(text)
-    if not match:
-        return None
-    day, month, year = int(match.group(1)), int(match.group(2)), match.group(3)
-    if year is None:
-        candidate_year = today.year
-    else:
-        candidate_year = int(year) + (2000 if len(year) == 2 else 0)
+def _make_date(year: int, month: int, day: int) -> Optional[date]:
     try:
-        parsed = date(candidate_year, month, day)
+        return date(year, month, day)
     except ValueError:
         return None
-    if year is None and parsed < today:
-        parsed = parsed.replace(year=today.year + 1)
-    return parsed
+
+
+def _full_year(raw: Optional[str]) -> Optional[int]:
+    if raw is None:
+        return None
+    return int(raw) + (2000 if len(raw) == 2 else 0)
+
+
+def _parse_dates(text: str, today: date) -> Optional[tuple[date, Optional[date]]]:
+    """Parse a start date or a date range; returns (start, end or None).
+
+    Accepts "15.10", "15.10.2026", "yarın", "15.10 - 18.10", "15-18.10",
+    "15-18 Ekim" and "28 Aralık - 3 Ocak". Missing years resolve to the
+    next occurrence; a missing start month is taken from the end date.
+    """
+    text = text.strip().casefold()
+    if text == "bugün":
+        return today, None
+    if text == "yarın":
+        return today + timedelta(days=1), None
+    text = MONTH_NAME_PATTERN.sub(lambda m: f".{MONTHS[m.group(1)]}", text)
+
+    single = DATE_PATTERN.match(text)
+    if single and single.group(2):
+        day, month, year = int(single.group(1)), int(single.group(2)), _full_year(single.group(3))
+        start = _make_date(year or today.year, month, day)
+        if start is not None and year is None and start < today:
+            start = _make_date(today.year + 1, month, day)
+        return (start, None) if start else None
+
+    ranged = RANGE_PATTERN.match(text)
+    if not ranged or not ranged.group(5):
+        return None
+    d1, m1, y1 = int(ranged.group(1)), ranged.group(2), _full_year(ranged.group(3))
+    d2, m2, y2 = int(ranged.group(4)), int(ranged.group(5)), _full_year(ranged.group(6))
+    m1 = int(m1) if m1 else m2
+    if y1 is None and y2 is None:
+        start = _make_date(today.year, m1, d1)
+        if start is not None and start < today:
+            start = _make_date(today.year + 1, m1, d1)
+    else:
+        start = _make_date(y1 or y2, m1, d1)
+        if start is not None and y1 is None and (m1, d1) > (m2, d2):
+            start = _make_date(y2 - 1, m1, d1)
+    if start is None:
+        return None
+    end = _make_date(y2 or start.year, m2, d2)
+    if end is not None and y2 is None and end < start:
+        end = _make_date(start.year + 1, m2, d2)
+    return (start, end) if end else None
 
 
 # --- Entry points ----------------------------------------------------------
@@ -133,7 +175,7 @@ async def cb_new_trip(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await state.set_state(TripSetup.destination)
     await callback.message.answer(
-        "1/7 · Nereye gidiyorsun? Şehir, bölge veya ülke yazabilirsin (ör. Roma, Kapadokya, Batum).",
+        "1/6 · Nereye gidiyorsun? Şehir, bölge veya ülke yazabilirsin (ör. Roma, Kapadokya, Batum).",
         parse_mode=None,
     )
 
@@ -179,20 +221,41 @@ async def setup_confirm_place(callback: CallbackQuery, state: FSMContext) -> Non
         return
     await state.set_state(TripSetup.start_date)
     await callback.message.edit_text(
-        "2/7 · Ne zaman başlıyor? (ör. 15.10, 15.10.2026, yarın)", parse_mode=None
+        "2/6 · Hangi tarihler arasında?\n"
+        "Aralık yazabilirsin (ör. 15-18 Ekim, 15.10 - 18.10.2026) "
+        "ya da sadece başlangıç tarihini (ör. 15.10, yarın).",
+        parse_mode=None,
     )
 
 
 @router.message(TripSetup.start_date)
 async def setup_start_date(message: Message, state: FSMContext) -> None:
-    start = _parse_date(message.text or "", _today())
-    if start is None or start < _today():
-        await message.answer("Tarihi anlayamadım. Örnek: 15.10 veya 15.10.2026", parse_mode=None)
+    parsed = _parse_dates(message.text or "", _today())
+    if parsed is None or parsed[0] < _today():
+        await message.answer(
+            "Tarihi anlayamadım. Örnekler: 15-18 Ekim, 15.10 - 18.10, 15.10.2026", parse_mode=None
+        )
+        return
+    start, end = parsed
+    if end is not None:
+        days = (end - start).days + 1
+        if not 1 <= days <= MAX_TRIP_DAYS:
+            await message.answer(
+                f"Gezi en fazla {MAX_TRIP_DAYS} gün olabilir ve bitiş başlangıçtan önce olamaz. "
+                "Tarihleri tekrar yazar mısın?",
+                parse_mode=None,
+            )
+            return
+        await state.update_data(start_date=start.isoformat())
+        await message.answer(
+            f"🗓 {start:%d.%m.%Y} – {end:%d.%m.%Y} ({days} gün)", parse_mode=None
+        )
+        await _set_days(message, state, days)
         return
     await state.update_data(start_date=start.isoformat())
     await state.set_state(TripSetup.days)
     await message.answer(
-        f"3/7 · Kaç gün kalacaksın? (1-{MAX_TRIP_DAYS})",
+        f"{start:%d.%m.%Y} başlangıçlı. Kaç gün kalacaksın? (1-{MAX_TRIP_DAYS})",
         parse_mode=None,
         reply_markup=_buttons("days", {str(n): str(n) for n in range(1, 8)}, per_row=7),
     )
@@ -201,7 +264,7 @@ async def setup_start_date(message: Message, state: FSMContext) -> None:
 async def _set_days(message: Message, state: FSMContext, days: int) -> None:
     await state.update_data(days=days)
     await state.set_state(TripSetup.companions)
-    await message.answer("4/7 · Kiminle gidiyorsun?", parse_mode=None, reply_markup=_buttons("comp", COMPANIONS, per_row=2))
+    await message.answer("3/6 · Kiminle gidiyorsun?", parse_mode=None, reply_markup=_buttons("comp", COMPANIONS, per_row=2))
 
 
 @router.callback_query(TripSetup.days, F.data.startswith("tset:days:"))
@@ -229,7 +292,7 @@ async def setup_companions(callback: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(companions=callback.data.split(":")[2], interests=[])
     await state.set_state(TripSetup.interests)
     await callback.message.edit_text(
-        "5/7 · Neler ilgini çeker? Birden fazla seçebilirsin.", parse_mode=None, reply_markup=_interests_keyboard([])
+        "4/6 · Neler ilgini çeker? Birden fazla seçebilirsin.", parse_mode=None, reply_markup=_interests_keyboard([])
     )
 
 
@@ -243,7 +306,7 @@ async def setup_interests(callback: CallbackQuery, state: FSMContext) -> None:
             return
         await callback.answer()
         await state.set_state(TripSetup.budget)
-        await callback.message.edit_text("6/7 · Bütçe seviyen?", parse_mode=None, reply_markup=_buttons("budget", BUDGETS, per_row=3))
+        await callback.message.edit_text("5/6 · Bütçe seviyen?", parse_mode=None, reply_markup=_buttons("budget", BUDGETS, per_row=3))
         return
     if key in INTERESTS:
         selected = [k for k in selected if k != key] if key in selected else selected + [key]
@@ -258,7 +321,7 @@ async def setup_budget(callback: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(budget=callback.data.split(":")[2])
     await state.set_state(TripSetup.notes)
     await callback.message.edit_text(
-        "7/7 · Eklemek istediğin bir şey var mı?\n(ör. araba kiralayacağım, müzeleri çok sevmem, otelim Taksim'de)",
+        "6/6 · Eklemek istediğin bir şey var mı?\n(ör. araba kiralayacağım, müzeleri çok sevmem, otelim Taksim'de)",
         parse_mode=None,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Yok, planla ✨", callback_data="tset:notes:skip")]]),
     )
