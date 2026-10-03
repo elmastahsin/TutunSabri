@@ -34,22 +34,32 @@ class OllamaResponseError(OllamaError):
 class OllamaClient:
     """Send non-streaming chat requests to the local Ollama service."""
 
-    async def chat(self, prompt: str) -> str:
+    async def chat(
+        self,
+        prompt: str,
+        *,
+        system_prompt: str = SYSTEM_PROMPT,
+        max_tokens: int = OLLAMA_MAX_OUTPUT_TOKENS,
+        json_mode: bool = False,
+        timeout: float = OLLAMA_TIMEOUT_SECONDS,
+    ) -> str:
         """Return the assistant response generated for a user prompt."""
         payload: dict[str, Any] = {
             "model": OLLAMA_MODEL,
             "stream": False,
-            "options": {"num_predict": OLLAMA_MAX_OUTPUT_TOKENS},
+            "options": {"num_predict": max_tokens},
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt},
             ],
         }
+        if json_mode:
+            payload["format"] = "json"
 
         try:
             async with httpx.AsyncClient(
                 base_url=OLLAMA_BASE_URL,
-                timeout=OLLAMA_TIMEOUT_SECONDS,
+                timeout=timeout,
             ) as client:
                 response = await client.post("/api/chat", json=payload)
                 response.raise_for_status()

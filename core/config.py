@@ -18,6 +18,8 @@ class Settings(BaseSettings):
         "tr-TR-AhmetNeural", alias="PODCAST_TTS_VOICE"
     )
     podcast_tts_rate: str = Field("-5%", alias="PODCAST_TTS_RATE")
+    gemini_api_key: str = Field("", alias="GEMINI_API_KEY")
+    gemini_model: str = Field("gemini-2.5-flash", alias="GEMINI_MODEL")
 
 
 settings = Settings()
