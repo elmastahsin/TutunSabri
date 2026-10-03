@@ -1,0 +1,15 @@
+[Unit]
+Description=TutunSabri Telegram Bot
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/tahsin/server/TutunSabri
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/tahsin/server/TutunSabri/.venv/bin/python bot.py
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target

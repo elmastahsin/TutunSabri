@@ -6,12 +6,12 @@ PartOf=tutunsabri.target
 
 [Service]
 Type=simple
-User=ubuntu
-Group=ubuntu
-WorkingDirectory=/home/ubuntu/tutunsabri
-Environment=HOME=/home/ubuntu
+User=tahsin
+Group=tahsin
+WorkingDirectory=/home/tahsin/server/TutunSabri
+Environment=HOME=/home/tahsin
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/home/ubuntu/tutunsabri/.venv/bin/python3 bot.py
+ExecStart=/home/tahsin/server/TutunSabri/.venv/bin/python bot.py
 Restart=always
 RestartSec=5
 TimeoutStopSec=20
