@@ -19,6 +19,8 @@ from core.repositories import (
     update_task_status,
 )
 from modules.ai.handlers import router as ai_router
+from modules.diet.handlers import router as diet_router
+from modules.diet.scheduler import run_diet_scheduler
 from modules.news.digest import run_daily_news_scheduler
 from modules.news.handlers import router as news_router
 from modules.news.podcast import router as podcast_router
@@ -94,6 +96,10 @@ async def run_bot() -> None:
             BotCommand(command="yhtcancel", description="YHT aramasını iptal et"),
             BotCommand(command="yhtrelease", description="Tutulan koltuğu bırak"),
             BotCommand(command="ai", description="Yerel AI asistanına soru sor"),
+            BotCommand(command="diyet", description="Diyetisyen menüsü ve günlük plan"),
+            BotCommand(command="diyetsor", description="Diyetisyene soru sor"),
+            BotCommand(command="kilo", description="Güncel kilonu kaydet"),
+            BotCommand(command="diyetsaat", description="Öğün saatlerini ayarla"),
             BotCommand(command="news", description="Güncel haber özetini hazırla"),
             BotCommand(command="podcast", description="Yerel haber podcasti hazırla"),
             BotCommand(command="stats", description="İstatistikleri göster"),
@@ -106,15 +112,20 @@ async def run_bot() -> None:
     dispatcher.callback_query.middleware(ActiveUserMiddleware())
     dispatcher.include_router(core_router)
     dispatcher.include_router(ai_router)
+    dispatcher.include_router(diet_router)
     dispatcher.include_router(news_router)
     dispatcher.include_router(podcast_router)
     dispatcher.include_router(yht_router)
-    news_scheduler = asyncio.create_task(run_daily_news_scheduler(bot))
+    schedulers = [
+        asyncio.create_task(run_daily_news_scheduler(bot)),
+        asyncio.create_task(run_diet_scheduler(bot)),
+    ]
     try:
         await dispatcher.start_polling(bot)
     finally:
-        news_scheduler.cancel()
-        await asyncio.gather(news_scheduler, return_exceptions=True)
+        for scheduler in schedulers:
+            scheduler.cancel()
+        await asyncio.gather(*schedulers, return_exceptions=True)
 
 
 def main() -> None:
