@@ -20,7 +20,6 @@ from modules.diet.config import (
     CHECKIN_TIME,
     DAILY_LIST_LEAD_MINUTES,
     EVENT_GRACE_MINUTES,
-    MEAL_SLOTS,
     SCHEDULER_TICK_SECONDS,
     TIMEZONE,
     WATER_TIMES,
@@ -64,8 +63,8 @@ def events_for_day(profile: DietProfile, day: date) -> Iterator[DueEvent]:
     meal_times = repo.meal_times_of(profile)
     first_meal = min(_at(day, value) for value in meal_times.values())
     yield DueEvent(f"{stamp}:list", "list", first_meal - timedelta(minutes=DAILY_LIST_LEAD_MINUTES))
-    for slot in MEAL_SLOTS:
-        yield DueEvent(f"{stamp}:meal:{slot.key}", "meal", _at(day, meal_times[slot.key]), slot.key)
+    for slot_key, hhmm in meal_times.items():
+        yield DueEvent(f"{stamp}:meal:{slot_key}", "meal", _at(day, hhmm), slot_key)
     if profile.water_enabled:
         for hhmm in WATER_TIMES:
             yield DueEvent(f"{stamp}:water:{hhmm}", "water", _at(day, hhmm))
@@ -94,7 +93,9 @@ async def send_daily_list(bot: Bot, profile: DietProfile, user: User, day: date)
 
 async def send_meal(bot: Bot, profile: DietProfile, user: User, day: date, slot_key: str) -> None:
     plan = await get_or_create_plan(profile, day)
-    meal = next(m for m in plan["meals"] if m["slot"] == slot_key)
+    meal = next((m for m in plan["meals"] if m["slot"] == slot_key), None)
+    if meal is None:
+        return
     await bot.send_message(
         user.telegram_user_id,
         render_meal(meal, repo.meal_times_of(profile)[slot_key]),

@@ -27,6 +27,14 @@ MEAL_SLOTS = (
 )
 MEAL_SLOT_BY_KEY = {slot.key: slot for slot in MEAL_SLOTS}
 
+# Meal pattern -> (label, active slot keys, default times overriding the slot defaults).
+MEAL_PATTERNS = {
+    "2": ("2 öğün (kahvaltı + akşam)", ("kahvalti", "aksam"), {"kahvalti": "10:00", "aksam": "19:00"}),
+    "3": ("3 ana öğün", ("kahvalti", "ogle", "aksam"), {}),
+    "5": ("3 ana + 2 ara öğün", ("kahvalti", "ara1", "ogle", "ara2", "aksam"), {}),
+}
+DEFAULT_MEAL_PATTERN = "5"
+
 DAILY_LIST_LEAD_MINUTES = 30
 WATER_TIMES = ("10:00", "12:00", "15:00", "17:30", "21:00")
 CHECKIN_TIME = "21:45"

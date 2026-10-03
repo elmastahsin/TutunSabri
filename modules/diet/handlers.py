@@ -20,7 +20,7 @@ from core.database import SessionFactory
 from core.models import User
 from modules.ai.handlers import split_message
 from modules.diet import repository as repo
-from modules.diet.config import ACTIVITY_LEVELS, GOALS, MEAL_SLOT_BY_KEY, MEAL_SLOTS, SEXES, TIMEZONE
+from modules.diet.config import ACTIVITY_LEVELS, GOALS, MEAL_PATTERNS, SEXES, TIMEZONE
 from modules.diet.llm import DietAIError
 from modules.diet.models import DietProfile
 from modules.diet.planner import (
@@ -49,6 +49,7 @@ class DietSetup(StatesGroup):
     target_weight = State()
     goal = State()
     activity = State()
+    meal_pattern = State()
     restrictions = State()
     preferences = State()
 
@@ -88,9 +89,10 @@ def _menu_keyboard(profile: DietProfile) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="✏️ Profili düzenle", callback_data="diet:edit"),
             ],
             [
+                InlineKeyboardButton(text="🍽 Öğün düzeni", callback_data="diet:pattern"),
                 InlineKeyboardButton(text="⏰ Öğün saatleri", callback_data="diet:times"),
-                InlineKeyboardButton(text="⚙️ Hatırlatmalar", callback_data="diet:reminders"),
             ],
+            [InlineKeyboardButton(text="⚙️ Hatırlatmalar", callback_data="diet:reminders")],
             [
                 InlineKeyboardButton(text="⚖️ Kilo gir", callback_data="diet:weight"),
                 InlineKeyboardButton(text=toggle, callback_data="diet:toggle:is_enabled"),
@@ -157,7 +159,7 @@ async def handle_diet(message: Message, state: FSMContext, db_user: User) -> Non
 
 async def _start_wizard(message: Message, state: FSMContext) -> None:
     await state.set_state(DietSetup.sex)
-    await message.answer("1/9 · Cinsiyetin?", parse_mode=None, reply_markup=_choice_keyboard("sex", SEXES))
+    await message.answer("1/10 · Cinsiyetin?", parse_mode=None, reply_markup=_choice_keyboard("sex", SEXES))
 
 
 # --- Profile wizard --------------------------------------------------------
@@ -175,7 +177,7 @@ def _parse_number(text: Optional[str], low: float, high: float) -> Optional[floa
 async def setup_sex(callback: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(sex=callback.data.split(":")[2])
     await state.set_state(DietSetup.age)
-    await callback.message.edit_text("2/9 · Kaç yaşındasın?", parse_mode=None)
+    await callback.message.edit_text("2/10 · Kaç yaşındasın?", parse_mode=None)
     await callback.answer()
 
 
@@ -187,7 +189,7 @@ async def setup_age(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(age=int(value))
     await state.set_state(DietSetup.height)
-    await message.answer("3/9 · Boyun kaç cm? (ör. 178)", parse_mode=None)
+    await message.answer("3/10 · Boyun kaç cm? (ör. 178)", parse_mode=None)
 
 
 @router.message(DietSetup.height)
@@ -198,7 +200,7 @@ async def setup_height(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(height_cm=int(value))
     await state.set_state(DietSetup.weight)
-    await message.answer("4/9 · Şu anki kilon? (ör. 82.5)", parse_mode=None)
+    await message.answer("4/10 · Şu anki kilon? (ör. 82.5)", parse_mode=None)
 
 
 @router.message(DietSetup.weight)
@@ -210,7 +212,7 @@ async def setup_weight(message: Message, state: FSMContext) -> None:
     await state.update_data(weight_kg=round(value, 1))
     await state.set_state(DietSetup.target_weight)
     await message.answer(
-        "5/9 · Hedef kilon var mı? (ör. 75) Yoksa geçebilirsin.",
+        "5/10 · Hedef kilon var mı? (ör. 75) Yoksa geçebilirsin.",
         parse_mode=None,
         reply_markup=_skip_keyboard("target_weight"),
     )
@@ -228,7 +230,7 @@ async def setup_target_weight(message: Message, state: FSMContext) -> None:
 
 async def _ask_goal(message: Message, state: FSMContext) -> None:
     await state.set_state(DietSetup.goal)
-    await message.answer("6/9 · Hedefin nedir?", parse_mode=None, reply_markup=_choice_keyboard("goal", GOALS))
+    await message.answer("6/10 · Hedefin nedir?", parse_mode=None, reply_markup=_choice_keyboard("goal", GOALS))
 
 
 @router.callback_query(DietSetup.goal, F.data.startswith("dset:goal:"))
@@ -236,19 +238,39 @@ async def setup_goal(callback: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(goal=callback.data.split(":")[2])
     await state.set_state(DietSetup.activity)
     await callback.message.edit_text(
-        "7/9 · Günlük aktivite seviyen?",
+        "7/10 · Günlük aktivite seviyen?",
         parse_mode=None,
         reply_markup=_choice_keyboard("activity", ACTIVITY_LEVELS),
     )
     await callback.answer()
 
 
+def _pattern_options() -> dict[str, str]:
+    return {key: label for key, (label, _, _) in MEAL_PATTERNS.items()}
+
+
 @router.callback_query(DietSetup.activity, F.data.startswith("dset:activity:"))
 async def setup_activity(callback: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(activity=callback.data.split(":")[2])
+    await state.set_state(DietSetup.meal_pattern)
+    await callback.message.edit_text(
+        "8/10 · Günde genelde kaç öğün yiyorsun?",
+        parse_mode=None,
+        reply_markup=_choice_keyboard("pattern", _pattern_options()),
+    )
+    await callback.answer()
+
+
+@router.callback_query(DietSetup.meal_pattern, F.data.startswith("dset:pattern:"))
+async def setup_meal_pattern(callback: CallbackQuery, state: FSMContext) -> None:
+    pattern = callback.data.split(":")[2]
+    if pattern not in MEAL_PATTERNS:
+        await callback.answer()
+        return
+    await state.update_data(meal_pattern=pattern)
     await state.set_state(DietSetup.restrictions)
     await callback.message.edit_text(
-        "8/9 · Alerjin, intoleransın veya sağlık kısıtın var mı?\n"
+        "9/10 · Alerjin, intoleransın veya sağlık kısıtın var mı?\n"
         "(ör. laktoz intoleransı, gluten, şeker hastalığı, vejetaryenim)",
         parse_mode=None,
         reply_markup=_skip_keyboard("restrictions"),
@@ -265,7 +287,7 @@ async def setup_restrictions(message: Message, state: FSMContext) -> None:
 async def _ask_preferences(message: Message, state: FSMContext) -> None:
     await state.set_state(DietSetup.preferences)
     await message.answer(
-        "9/9 · Sevmediğin yiyecekler veya tercihlerin?\n"
+        "10/10 · Sevmediğin yiyecekler veya tercihlerin?\n"
         "(ör. balık sevmem, öğlen iş yerinde yiyorum, pratik tarifler olsun)",
         parse_mode=None,
         reply_markup=_skip_keyboard("preferences"),
@@ -306,6 +328,7 @@ async def _finish_wizard(message: Message, state: FSMContext, db_user: User) -> 
         f"🏃 Günlük harcama: {targets.tdee} kcal\n"
         f"🎯 Günlük hedef: <b>~{targets.calories} kcal</b>, {targets.protein_g} g protein, {targets.water_l} L su\n\n"
         "Her sabah ilk öğünden önce günün listesini, her öğün saatinde de o öğünü göndereceğim.\n"
+        "Saatleri ⏰ Öğün saatleri menüsünden görüp /diyetsaat ile değiştirebilirsin.\n"
         "<i>Not: Bu öneriler genel bilgilendirme amaçlıdır; sağlık sorunun varsa doktoruna danış.</i>",
         parse_mode="HTML",
     )
@@ -384,9 +407,48 @@ async def cb_times(callback: CallbackQuery, db_user: User) -> None:
 def _times_text(profile: DietProfile) -> str:
     times = repo.meal_times_of(profile)
     lines = ["⏰ <b>Öğün saatlerin</b>", ""]
-    lines.extend(f"{slot.emoji} {times[slot.key]} · {slot.label} (<code>{slot.key}</code>)" for slot in MEAL_SLOTS)
+    lines.extend(
+        f"{slot.emoji} {times[slot.key]} · {slot.label} (<code>{slot.key}</code>)"
+        for slot in repo.active_slots(profile)
+    )
     lines.extend(("", "Değiştirmek için: <code>/diyetsaat kahvalti 09:00</code>"))
     return "\n".join(lines)
+
+
+@router.callback_query(F.data == "diet:pattern")
+async def cb_pattern(callback: CallbackQuery, db_user: User) -> None:
+    profile = await _require_profile(callback, db_user)
+    if profile is None:
+        return
+    rows = [
+        [InlineKeyboardButton(
+            text=("✅ " if key == profile.meal_pattern else "") + label,
+            callback_data=f"diet:setpattern:{key}",
+        )]
+        for key, label in _pattern_options().items()
+    ]
+    rows.append([InlineKeyboardButton(text="⬅️ Menü", callback_data="diet:menu")])
+    await callback.message.edit_text(
+        "🍽 Günde kaç öğün yemek istiyorsun?", parse_mode=None,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("diet:setpattern:"))
+async def cb_set_pattern(callback: CallbackQuery, db_user: User) -> None:
+    pattern = callback.data.split(":")[2]
+    profile = await _require_profile(callback, db_user)
+    if profile is None or pattern not in MEAL_PATTERNS:
+        return
+    async with SessionFactory() as session:
+        profile = await repo.save_profile(session, db_user.id, {"meal_pattern": pattern})
+    await callback.answer("Öğün düzeni güncellendi")
+    await callback.message.edit_text(_menu_text(profile), parse_mode="HTML", reply_markup=_menu_keyboard(profile))
+    await callback.message.answer(
+        _times_text(profile) + "\n\nBugünün planı yeni düzene göre yeniden hazırlanacak.",
+        parse_mode="HTML",
+    )
 
 
 @router.callback_query(F.data == "diet:reminders")
@@ -441,11 +503,11 @@ async def cb_meal_status(callback: CallbackQuery, db_user: User) -> None:
 @router.callback_query(F.data.regexp(r"^diet:swap:\d{8}:\w+$"))
 async def cb_meal_swap(callback: CallbackQuery, db_user: User) -> None:
     _, _, stamp, slot_key = callback.data.split(":")
-    if slot_key not in MEAL_SLOT_BY_KEY:
-        await callback.answer()
-        return
     profile = await _require_profile(callback, db_user)
     if profile is None:
+        return
+    if slot_key not in repo.meal_times_of(profile):
+        await callback.answer("Bu öğün artık öğün düzeninde yok.", show_alert=True)
         return
     await callback.answer("Alternatif hazırlanıyor...")
     plan_date = _parse_stamp(stamp)
@@ -532,7 +594,7 @@ async def handle_meal_time(message: Message, command: CommandObject, db_user: Us
         await message.answer("Önce /diyet ile profilini oluştur.", parse_mode=None)
         return
     parts = (command.args or "").split()
-    if len(parts) != 2 or parts[0] not in MEAL_SLOT_BY_KEY or not TIME_PATTERN.match(parts[1]):
+    if len(parts) != 2 or parts[0] not in repo.meal_times_of(profile) or not TIME_PATTERN.match(parts[1]):
         await message.answer(_times_text(profile), parse_mode="HTML")
         return
     times = repo.meal_times_of(profile)

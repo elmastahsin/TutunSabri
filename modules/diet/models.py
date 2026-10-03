@@ -39,6 +39,7 @@ class DietProfile(Base):
     restrictions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     preferences: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     meal_times: Mapped[str] = mapped_column(Text, default="{}")
+    meal_pattern: Mapped[str] = mapped_column(String(8), default="5")
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     water_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     checkin_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
