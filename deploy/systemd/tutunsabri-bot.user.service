@@ -1,15 +1,10 @@
 [Unit]
 Description=TutunSabri Telegram Bot
-After=network.target redis-server.service
-Requires=redis-server.service
-PartOf=tutunsabri.target
+After=network-online.target
 
 [Service]
 Type=simple
-User=tahsin
-Group=tahsin
 WorkingDirectory=/home/tahsin/server/TutunSabri
-Environment=HOME=/home/tahsin
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/home/tahsin/server/TutunSabri/.venv/bin/python bot.py
 Restart=always
@@ -17,4 +12,4 @@ RestartSec=5
 TimeoutStopSec=20
 
 [Install]
-WantedBy=tutunsabri.target
+WantedBy=default.target

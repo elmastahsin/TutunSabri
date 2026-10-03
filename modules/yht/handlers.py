@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime
 from html import escape
 
@@ -51,14 +50,6 @@ class SearchStates(StatesGroup):
     travel_hour = State()
     cancel_task_choice = State()
     release_task_choice = State()
-
-
-async def _send_delayed_support_message(message: Message) -> None:
-    await asyncio.sleep(20)
-    await message.bot.send_message(
-        message.chat.id,
-        "Hayır dualarınızı [buradan](https://buymeacoffee.com/atakanakin) kabul ediyorum.",
-    )
 
 
 def _format_admin_release_error(task, user, error_text: str) -> str:
@@ -556,7 +547,6 @@ async def handle_yht_cancel(
                 "Tutulan koltuk bırakıldı ve işlem sonlandırıldı.",
                 reply_markup=remove_choice_keyboard(),
             )
-            asyncio.create_task(_send_delayed_support_message(message))
             return
 
         await cancel_task(session, target_task.task_id)
@@ -619,7 +609,6 @@ async def handle_yht_cancel_choice(
                 "Tutulan koltuk bırakıldı ve işlem sonlandırıldı.",
                 reply_markup=remove_choice_keyboard(),
             )
-            asyncio.create_task(_send_delayed_support_message(message))
             return
         await cancel_task(session, target_task.task_id)
     await state.clear()
@@ -677,7 +666,6 @@ async def handle_yht_release(
     await message.answer(
         "Tutulan koltuk bırakıldı.", reply_markup=remove_choice_keyboard()
     )
-    asyncio.create_task(_send_delayed_support_message(message))
 
 
 @router.message(SearchStates.release_task_choice)
@@ -728,7 +716,6 @@ async def handle_yht_release_choice(
         "Tutulan koltuk bırakıldı.",
         reply_markup=remove_choice_keyboard(),
     )
-    asyncio.create_task(_send_delayed_support_message(message))
 
 
 @router.message(Command("yhtinfo"))

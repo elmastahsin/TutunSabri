@@ -17,9 +17,7 @@ PUBLIC_COMMANDS = {"start"}
 PUBLIC_CALLBACKS = {
     "request_access",
     "cancel_access",
-    "info_whoami",
     "info_how_it_works",
-    "info_contact",
 }
 
 

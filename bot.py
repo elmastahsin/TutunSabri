@@ -5,6 +5,7 @@ import asyncio
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.types import BotCommand
 
 from core.config import settings
 from core.database import SessionFactory, init_database
@@ -17,8 +18,12 @@ from core.repositories import (
     set_task_message_id,
     update_task_status,
 )
-from modules.yht.logic import TCDDClient
+from modules.ai.handlers import router as ai_router
+from modules.news.digest import run_daily_news_scheduler
+from modules.news.handlers import router as news_router
+from modules.news.podcast import router as podcast_router
 from modules.yht.handlers import router as yht_router
+from modules.yht.logic import TCDDClient
 from tasks.worker import broker, monitor_yht_task
 
 
@@ -81,13 +86,35 @@ async def run_bot() -> None:
         token=settings.telegram_bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN),
     )
+    await bot.set_my_commands(
+        [
+            BotCommand(command="start", description="Ana ekranı aç"),
+            BotCommand(command="yht", description="Yeni YHT koltuk araması başlat"),
+            BotCommand(command="yhtinfo", description="Aktif YHT aramalarını göster"),
+            BotCommand(command="yhtcancel", description="YHT aramasını iptal et"),
+            BotCommand(command="yhtrelease", description="Tutulan koltuğu bırak"),
+            BotCommand(command="ai", description="Yerel AI asistanına soru sor"),
+            BotCommand(command="news", description="Güncel haber özetini hazırla"),
+            BotCommand(command="podcast", description="Yerel haber podcasti hazırla"),
+            BotCommand(command="stats", description="İstatistikleri göster"),
+            BotCommand(command="trending", description="Popüler güzergâhları göster"),
+        ]
+    )
     dispatcher = Dispatcher()
     dispatcher.update.middleware(LoggingMiddleware())
     dispatcher.message.middleware(ActiveUserMiddleware())
     dispatcher.callback_query.middleware(ActiveUserMiddleware())
     dispatcher.include_router(core_router)
+    dispatcher.include_router(ai_router)
+    dispatcher.include_router(news_router)
+    dispatcher.include_router(podcast_router)
     dispatcher.include_router(yht_router)
-    await dispatcher.start_polling(bot)
+    news_scheduler = asyncio.create_task(run_daily_news_scheduler(bot))
+    try:
+        await dispatcher.start_polling(bot)
+    finally:
+        news_scheduler.cancel()
+        await asyncio.gather(news_scheduler, return_exceptions=True)
 
 
 def main() -> None:

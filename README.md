@@ -45,6 +45,52 @@ tutunsabri
 
 All configuration is done through environment variables (or a `.env` file).
 
+## Ollama entegrasyonu
+
+Bot, `/ai` komutuyla aynı sunucudaki Ollama servisine bağlanır. Entegrasyon
+yalnızca `http://127.0.0.1:11434` adresini ve hızlı yanıt veren
+`qwen3:4b-instruct` modelini kullanır.
+
+Linux sunucuda Ollama'yı kurun:
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+Ardından modeli indirin:
+
+```bash
+ollama pull qwen3:4b-instruct
+```
+
+Servisin çalıştığını kontrol edin:
+
+```bash
+systemctl status ollama
+```
+
+Ardından Telegram'da bota bir soru gönderin:
+
+```text
+/ai Merhaba
+```
+
+## Günlük haber özeti
+
+Bot her gün Türkiye saatiyle 09.00 ve 19.00'da Google Haberler RSS üzerinden gündem,
+teknoloji ve yazılım başlıklarını toplar. Yerel Ollama bu başlıkları Türkçe ve
+kısa bir sabah bültenine dönüştürür; bülten aktif admin kullanıcılara gönderilir.
+Ollama geçici olarak kullanılamazsa bağlantıları içeren ham başlık listesi
+gönderilir. İnternet bağlantısı ve çalışan Ollama servisi önerilir.
+Kayıtlı kullanıcılar `/news` komutuyla istedikleri zaman kendileri için güncel
+bir bülten oluşturabilir.
+
+`/podcast` komutu aynı haberlerden Ollama ile kısa bir Türkçe anlatım metni
+hazırlar, metni Edge TTS'in Türkçe neural sesiyle MP3 olarak seslendirir ve
+isteği yapan kullanıcıya gönderir. Varsayılan ses `tr-TR-AhmetNeural`, konuşma
+hızı ise `%5` yavaştır. Bunlar `PODCAST_TTS_VOICE` ve `PODCAST_TTS_RATE`
+değişkenleriyle ayarlanabilir. Ses üretimi internet bağlantısı gerektirir.
+
 ## Access model
 
 - New users have no access by default. They can send an access request through the bot, which notifies all admins.

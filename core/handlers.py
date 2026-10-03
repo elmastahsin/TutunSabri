@@ -40,9 +40,6 @@ from modules.yht.utils import format_turkish_datetime_long
 
 router = Router(name="core")
 INFO_DIR = Path(__file__).resolve().parent.parent / "info"
-WHOAMI_PHOTO_ID = "AgACAgQAAxkBAAEBmO1puqJkukjL7wkCMy3c9ojTYBgjhgACvwxrG5X40VE1D6KSZ8KwFwEAAwIAA3cAAzoE"
-
-
 class BroadcastStates(StatesGroup):
     waiting_payload = State()
     waiting_caption = State()
@@ -73,12 +70,10 @@ def _start_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="Ben Kimim?", callback_data="info_whoami"),
                 InlineKeyboardButton(
                     text="Nasıl Çalışır?", callback_data="info_how_it_works"
                 ),
             ],
-            [InlineKeyboardButton(text="İletişim", callback_data="info_contact")],
         ]
     )
 
@@ -301,29 +296,11 @@ async def handle_pedro(message: Message, db_user: User) -> None:
     )
 
 
-@router.callback_query(lambda query: query.data == "info_whoami")
-async def handle_info_whoami(query: CallbackQuery) -> None:
-    await query.answer()
-    if query.message is not None:
-        await query.message.answer(_read_info_markdown("whoami.md"))
-        await query.message.answer_photo(
-            WHOAMI_PHOTO_ID,
-            caption="Gerçekte ben",
-        )
-
-
 @router.callback_query(lambda query: query.data == "info_how_it_works")
 async def handle_info_how_it_works(query: CallbackQuery) -> None:
     await query.answer()
     if query.message is not None:
         await query.message.answer(_read_info_markdown("howtowork.md"))
-
-
-@router.callback_query(lambda query: query.data == "info_contact")
-async def handle_info_contact(query: CallbackQuery) -> None:
-    await query.answer()
-    if query.message is not None:
-        await query.message.answer(_read_info_markdown("contact.md"))
 
 
 @router.callback_query(lambda query: query.data == "cancel_access")
